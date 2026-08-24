@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+
+"""Recover share/logo.txt from the oligarchy.fyi logo SVG.
+
+The site's logo is not artwork — it is a vectorised <pre> of block characters,
+which the page's own stylesheet says outright ("Vector, not a <pre>: ... The
+geometry is JetBrains Mono's own, so it draws what the <pre> was meant to look
+like"). Chrome's per-glyph rounding was knocking the rows out of column on
+phones, so they shipped the outlines instead.
+
+That means the banner does not have to be re-drawn or rasterised, which is what
+loses the letterforms: every rect in the path lands exactly on a 100 x 9
+character grid, and each one names the glyph that drew it.
+
+    width  600 + n*557.5   a run of n+1 full-width cells   (557.5 = the advance)
+    width  300             one half-width cell             -> left half block
+    height 1320            the full character box          -> full block
+    height 660 at cell top                                 -> upper half block
+    height 660 at cell top + 660                           -> lower half block
+
+Decoding each rect into the four quadrants of its cells and reading them back
+out reproduces the original text exactly, glyph for glyph.
+"""
+
+import re
+import sys
+from pathlib import Path
+
+CELL_W = 557.5      # JetBrains Mono advance width in the SVG's units
+LINE_H = 1093.75    # line height
+TOP = -113.125      # y of the first row
+GLYPH_W = 600.0     # block glyphs overdraw the advance slightly, so runs seam-lessly
+HALF_H = 660.0
+COLS, ROWS = 100, 9
+
+# (top-left, top-right, bottom-left, bottom-right) -> block character
+QUADRANTS = {
+    (0, 0, 0, 0): " ", (1, 0, 0, 0): "▘", (0, 1, 0, 0): "▝", (0, 0, 1, 0): "▖",
+    (0, 0, 0, 1): "▗", (1, 1, 0, 0): "▀", (0, 0, 1, 1): "▄", (1, 0, 1, 0): "▌",
+    (0, 1, 0, 1): "▐", (1, 0, 0, 1): "▚", (0, 1, 1, 0): "▞", (1, 1, 1, 0): "▛",
+    (1, 1, 0, 1): "▜", (1, 0, 1, 1): "▙", (0, 1, 1, 1): "▟", (1, 1, 1, 1): "█",
+}
+
+RECT = re.compile(r"M(-?[\d.]+) (-?[\d.]+)h(-?[\d.]+)v(-?[\d.]+)h(-?[\d.]+)z")
+
+
+def decode(svg: str) -> str:
+    path = re.search(r'\sd="([^"]+)"', svg)
+    if not path:
+        sys.exit("No path data in the SVG")
+
+    cells = [[[False] * 4 for _ in range(COLS)] for _ in range(ROWS)]
+
+    for match in RECT.finditer(path.group(1)):
+        x, y, w, h, _ = (float(v) for v in match.groups())
+        col = round(x / CELL_W)
+
+        # A rect either starts at the top of a row or halfway down it; which one
+        # is what separates an upper half block from a lower one.
+        offset = (y - TOP) / LINE_H
+        if abs(offset - round(offset)) < 1e-6:
+            row, at_top = round(offset), True
+        else:
+            row, at_top = round((y - TOP - HALF_H) / LINE_H), False
+
+        if w == GLYPH_W / 2:
+            span, parts = 1, (0, 2)                       # ▌
+        else:
+            span = round((w - GLYPH_W) / CELL_W) + 1
+            parts = (0, 1, 2, 3) if h != HALF_H else (0, 1) if at_top else (2, 3)
+
+        for c in range(col, col + span):
+            for part in parts:
+                cells[row][c][part] = True
+
+    rows = ("".join(QUADRANTS[tuple(int(q) for q in cell)] for cell in row).rstrip()
+            for row in cells)
+    return "\n".join(rows) + "\n"
+
+
+def main() -> None:
+    here = Path(__file__).resolve().parent.parent
+    svg = here / "share" / "oligarchy-logo.svg"
+    out = here / "share" / "logo.txt"
+
+    art = decode(svg.read_text())
+    out.write_text(art)
+
+    lines = art.splitlines()
+    glyphs = "".join(sorted(set(art) - {"\n", " "}))
+    print(f"Wrote {out} ({max(map(len, lines))} x {len(lines)}, glyphs: {glyphs})")
+
+
+if __name__ == "__main__":
+    main()

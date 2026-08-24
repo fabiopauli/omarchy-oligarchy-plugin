@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# Write the Oligarchy banner plus one tagline into the file Omarchy's
+# screensaver reads. omarchy-screensaver loops `ttfx -i <that file>` forever, so
+# rewriting it between effect cycles is what makes the tagline rotate.
+#
+# Usage: oligarchy-screensaver-text [tagline]
+#   With no argument a tagline is picked at random, never the one already shown.
+
+set -euo pipefail
+
+here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+DATA_DIR="${OLIGARCHY_DATA_DIR:-$here/../share}"
+TARGET="${OLIGARCHY_SCREENSAVER_TXT:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/branding/screensaver.txt}"
+STATE_DIR="${OLIGARCHY_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/oligarchy}"
+BACKUP="${OLIGARCHY_BACKUP:-$STATE_DIR/screensaver.txt.omarchy-backup}"
+
+logo="$DATA_DIR/logo.txt"
+taglines="$DATA_DIR/taglines.txt"
+
+for f in "$logo" "$taglines"; do
+  [[ -r $f ]] || { echo "Missing data file: $f" >&2; exit 1; }
+done
+
+# The banner is a fixed-width block; centre the tagline against it rather than
+# against the terminal, because ttfx anchors the whole block as one unit.
+width=$(awk '{ if (length($0) > w) w = length($0) } END { print w }' "$logo")
+
+pick_tagline() {
+  local current="" candidates=()
+  # Skip whatever is on screen now so a rotation always visibly changes.
+  [[ -r $TARGET ]] && current=$(awk 'NF { line = $0 } END { print line }' "$TARGET" | sed 's/^ *//; s/ *$//')
+
+  mapfile -t candidates < <(grep -v '^[[:space:]]*$' "$taglines" | grep -Fxv "$current")
+  ((${#candidates[@]})) || mapfile -t candidates < <(grep -v '^[[:space:]]*$' "$taglines")
+
+  printf '%s\n' "${candidates[RANDOM % ${#candidates[@]}]}"
+}
+
+tagline=${1:-$(pick_tagline)}
+
+# Pad rather than let ttfx centre it: trailing spaces would be stripped anyway,
+# so only the leading indent matters.
+indent=$(((width - ${#tagline}) / 2))
+((indent < 0)) && indent=0
+
+mkdir -p "$(dirname "$TARGET")" "$STATE_DIR"
+
+# Preserve the stock banner exactly once, before the plugin first replaces it.
+# The backup intentionally lives outside the plugin checkout so it survives
+# `omarchy plugin remove` and remains available for manual restoration.
+if [[ -f $TARGET && ! -e $BACKUP ]]; then
+  cp -- "$TARGET" "$BACKUP"
+fi
+
+# Atomic swap — ttfx may be reading the file at this very moment, and a partial
+# read paints a torn banner.
+tmp=$(mktemp "$(dirname "$TARGET")/.screensaver.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+
+{
+  cat "$logo"
+  echo
+  printf '%*s%s\n' "$indent" "" "$tagline"
+} >"$tmp"
+
+chmod 644 "$tmp"
+mv -f "$tmp" "$TARGET"
+trap - EXIT

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.fabiopauli.oligarchy-screensaver",
+  "name": "Oligarchy Screensaver",
+  "version": "1.0.0",
+  "author": "Fabio Pauli",
+  "license": "MIT",
+  "description": "Rotates oligarchy.fyi taglines beneath Omarchy's screensaver banner.",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
