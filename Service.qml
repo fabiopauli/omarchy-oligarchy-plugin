@@ -19,6 +19,9 @@ Item {
   property var screensaverWindows: ({})
   property int screensaverWindowCount: 0
   property bool rotationPending: false
+  property int writesStarted: 0
+  property int writesFinished: 0
+  property int lastWriterExitCode: 0
 
   function eventParts(event, count) {
     try {
@@ -58,6 +61,7 @@ Item {
 
     root.rotationPending = false
     writer.command = ["bash", root.pluginDir + "/bin/oligarchy-screensaver-text"]
+    root.writesStarted++
     writer.running = true
   }
 
@@ -66,6 +70,7 @@ Item {
     root.setScreensaverWindow(address, true)
     if (!wasInactive) return
 
+    console.log("oligarchy screensaver opened; rotation started")
     root.requestRotation()
     rotationTimer.start()
   }
@@ -77,6 +82,7 @@ Item {
 
     rotationTimer.stop()
     root.rotationPending = false
+    console.log("oligarchy screensaver closed; rotation stopped")
   }
 
   function handleHyprlandEvent(event) {
@@ -100,7 +106,10 @@ Item {
     id: rotationTimer
     interval: root.rotationIntervalMs
     repeat: true
-    onTriggered: root.requestRotation()
+    onTriggered: {
+      console.log("oligarchy screensaver rotation timer fired")
+      root.requestRotation()
+    }
   }
 
   Process {
@@ -115,10 +124,28 @@ Item {
     }
 
     onExited: function(exitCode) {
+      root.writesFinished++
+      root.lastWriterExitCode = exitCode
       if (exitCode !== 0)
         console.warn("oligarchy screensaver writer exited with code " + exitCode)
       if (root.rotationPending && root.screensaverWindowCount > 0)
         Qt.callLater(root.requestRotation)
+    }
+  }
+
+  IpcHandler {
+    target: "io.github.fabiopauli.oligarchy-screensaver"
+
+    function status(): string {
+      return JSON.stringify({
+        screensaverWindows: root.screensaverWindowCount,
+        timerRunning: rotationTimer.running,
+        writerRunning: writer.running,
+        rotationPending: root.rotationPending,
+        writesStarted: root.writesStarted,
+        writesFinished: root.writesFinished,
+        lastWriterExitCode: root.lastWriterExitCode
+      })
     }
   }
 

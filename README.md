@@ -18,6 +18,12 @@ Try it with:
 omarchy-launch-screensaver force
 ```
 
+Inspect the running service with:
+
+```bash
+omarchy-shell io.github.fabiopauli.oligarchy-screensaver status
+```
+
 The first write backs up the previous banner to:
 
 ```text
